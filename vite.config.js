@@ -28,4 +28,28 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    // Tauri supports es2021
+    target: "es2021",
+    // don't minify for debug builds
+    minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
+    // produce sourcemaps for debug builds
+    sourcemap: !!process.env.TAURI_DEBUG,
+    
+    // Chunk Size Warning Limit
+    chunkSizeWarningLimit: 1000,
+    
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+             if (id.includes('firebase')) return 'firebase';
+             if (id.includes('framer-motion')) return 'framer-motion';
+             if (id.includes('lucide-react')) return 'icons';
+             return 'vendor';
+          }
+        }
+      }
+    }
+  },
 }));

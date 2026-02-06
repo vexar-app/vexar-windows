@@ -1,11 +1,12 @@
 import Settings from './Settings';
+import { motion, AnimatePresence } from 'framer-motion';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { useState, useRef, useEffect } from 'react';
 import { Command } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
 
 // Re-add missing imports
-import { Power, Shield, Settings as SettingsIcon, FileText, X, Copy, Trash2 } from 'lucide-react';
+import { Power, Shield, Settings as SettingsIcon, FileText, X, Copy, Trash2, WifiOff } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { exit } from '@tauri-apps/plugin-process';
@@ -20,11 +21,46 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(true); 
+  const [isOnline, setIsOnline] = useState(navigator.onLine); // ✅ Internet Durumu
+
+  // Check Admin on Mount
+  useEffect(() => {
+    // ... existing admin check ...
+    invoke('check_admin')
+      .then(result => {
+        setIsAdmin(result);
+        if (!result) {
+          addLog("Yönetici izni eksik! Uygulama düzgün çalışmayabilir.", "error");
+        }
+      })
+      .catch(err => {
+        console.error('Admin check warning:', err);
+        setIsAdmin(true); 
+      });
+
+    // ✅ Internet Connection Listeners
+    const handleOnline = () => {
+        setIsOnline(true);
+        addLog("İnternet bağlantısı tekrar sağlandı.", "success");
+    };
+    const handleOffline = () => {
+        setIsOnline(false);
+        addLog("İnternet bağlantısı kesildi!", "error");
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   
   // Settings State
   const [config, setConfig] = useState(() => {
-    const saved = localStorage.getItem('vexar_config');
-    return saved ? JSON.parse(saved) : {
+    const defaultSettings = {
       language: 'tr',
       autoStart: false,
       autoConnect: false,
@@ -32,8 +68,20 @@ function App() {
       dnsMode: 'auto',
       selectedDns: 'cloudflare',
       autoReconnect: true,
-      analytics: true
+      analytics: true,
+      dpiMethod: '0'
     };
+    
+    const saved = localStorage.getItem('vexar_config');
+    if (saved) {
+        try {
+            return { ...defaultSettings, ...JSON.parse(saved) };
+        } catch (e) {
+            console.error("Failed to parse config:", e);
+            return defaultSettings;
+        }
+    }
+    return defaultSettings;
   });
 
   const childProcess = useRef(null);
@@ -305,10 +353,11 @@ function App() {
       }
       
       // Diğer parametreler
+      // ISS Uyumluluğu ve Stabilite İçin Optimize Edilmiş Ayarlar
       args.push(
-        '-window-size', '1',
-        '-enable-doh',              
-        '-timeout', '60'
+        '-window-size', configRef.current.dpiMethod || '1', // Ayarlardan gelen değer
+        '-enable-doh',            // DNS zehirlemesini önlemek için şart
+        '-timeout', '5000'        // 60ms çok kısaydı, 5000ms (5sn) genel internet gecikmeleri için ideal
       );
       
       const command = Command.sidecar('binaries/spoofdpi', args);
@@ -723,6 +772,41 @@ function App() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // DPI & Layout Scaling Fix
+  useEffect(() => {
+    const handleResize = () => {
+      // Hedef tasarım boyutları (Tauri config ile uyumlu)
+      const DESIGN_WIDTH = 380;
+      const DESIGN_HEIGHT = 700;
+      
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      
+      // X ve Y eksenlerindeki sığma oranlarını hesapla
+      const scaleX = currentWidth / DESIGN_WIDTH;
+      const scaleY = currentHeight / DESIGN_HEIGHT;
+      
+      // En kısıtlı alana göre scale belirle (Aspect Ratio koruyarak sığdır)
+      // %98'in altındaysa scale et (titremeyi önlemek için tolerans)
+      const scale = Math.min(scaleX, scaleY);
+      
+      if (scale < 0.99) {
+        document.body.style.zoom = `${scale}`;
+      } else {
+        document.body.style.zoom = '1';
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    
+    // Initial checks
+    handleResize();
+    setTimeout(handleResize, 100);
+    setTimeout(handleResize, 500); // Yüklenme gecikmeleri için
+
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Native App Experience: Disable browser-like behaviors
   useEffect(() => {
     // Disable right-click
@@ -765,6 +849,119 @@ function App() {
   // Render
   return (
     <div className="app-container fade-in">
+      <AnimatePresence>
+        {!isAdmin && (
+          <motion.div 
+            className="v2-settings-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{ 
+              zIndex: 99999, 
+              background: '#09090b', 
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              textAlign: 'center', 
+              padding: '2rem' 
+            }}
+          >
+            {/* Background Glow */}
+            <div style={{
+                position: 'absolute',
+                top: '40%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '100%',
+                height: '400px',
+                background: 'radial-gradient(circle, rgba(239, 68, 68, 0.08) 0%, rgba(0,0,0,0) 60%)',
+                pointerEvents: 'none',
+                zIndex: 0
+            }} />
+
+            <div style={{ zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: '420px' }}>
+                <img 
+                  src="/vexar-logo.png" 
+                  alt="Vexar" 
+                  style={{ 
+                    width: '80px', 
+                    height: '80px', 
+                    marginBottom: '1.5rem',
+                    borderRadius: '12px', // Minik border-radius
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+                  }} 
+                />
+
+                <h1 style={{ fontSize: '1.5rem', marginBottom: '0.75rem', color: '#fff', fontWeight: '700' }}>
+                    Yönetici İzni Gerekli
+                </h1>
+                
+                <p style={{ color: '#a1a1aa', marginBottom: '1.5rem', lineHeight: '1.6', fontSize: '0.95rem' }}>
+                    Vexar'ın sistem proxy ayarlarını yönetebilmesi için yetkiye ihtiyacı vardır.
+                </p>
+
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: '12px',
+                  padding: '1rem',
+                  marginBottom: '2rem',
+                  textAlign: 'left',
+                  width: '100%'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', textAlign: 'left' }}>
+                    <div style={{ 
+                      background: 'rgba(239, 68, 68, 0.15)', 
+                      padding: '10px', 
+                      borderRadius: '8px',
+                      color: '#ef4444',
+                      flexShrink: 0,
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      <Shield size={22} />
+                    </div>
+                    <div>
+                      <div style={{ color: '#fff', fontSize: '0.9rem', fontWeight: '600', marginBottom: '4px' }}>Nasıl Çözülür?</div>
+                      <div style={{ color: '#d4d4d8', fontSize: '0.85rem', lineHeight: '1.4' }}>
+                        Uygulamayı kapatın, simgeye sağ tıklayın ve <br/>
+                        <span style={{ color: '#f87171', fontWeight: '500' }}>"Yönetici olarak çalıştır"</span> seçeneğini seçin.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  style={{ 
+                    background: '#ef4444', 
+                    color: 'white', 
+                    padding: '0.8rem 2rem', 
+                    border: 'none', 
+                    borderRadius: '10px', 
+                    fontSize: '0.95rem', 
+                    fontWeight: '600', 
+                    cursor: 'pointer',
+                    width: '100%',
+                    transition: 'opacity 0.2s',
+                  }}
+                  onMouseEnter={(e) => e.target.style.opacity = '0.9'}
+                  onMouseLeave={(e) => e.target.style.opacity = '1'}
+                  onClick={() => exit(0)}
+                >
+                  Uygulamayı Kapat
+                </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Header */}
       <header className="app-header">
         <div className="brand">
@@ -780,6 +977,32 @@ function App() {
           </span>
         </div>
       </header>
+
+      {/* Offline Alert */}
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            style={{ overflow: 'hidden', background: '#eab308' }} // Yellow/Amber background for warning
+          >
+             <div style={{ 
+                padding: '8px 16px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                gap: '8px',
+                color: '#000',
+                fontSize: '0.85rem',
+                fontWeight: '600'
+             }}>
+                <WifiOff size={16} />
+                <span>İnternet Bağlantısı Yok</span>
+             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content */}
       <main className="main-content">

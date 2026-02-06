@@ -1,8 +1,8 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  ChevronLeft, Globe, Wand2, Power, Zap, RotateCw, 
-  Shield, Trash2, Youtube, Coffee, AlertTriangle, Check, Wrench
+  ChevronLeft, Globe, Power, Zap, RotateCw, Activity, 
+  Shield, Youtube, Coffee, AlertTriangle, Check, Wrench
 } from 'lucide-react';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { open, Command } from '@tauri-apps/plugin-shell';
@@ -170,6 +170,59 @@ const Settings = ({ onBack, config, updateConfig }) => {
       {/* Scrollable Content */}
       <div className="v2-settings-content">
         
+
+        {/* Section: DPI Method */}
+        <div className="v2-section">
+          <div className="v2-section-title">BAĞLANTI YÖNTEMİ</div>
+          <div className="v2-card">
+              <div 
+                className={`v2-item hover-effect ${config.dpiMethod === '1' ? 'v2-selected' : ''}`}
+                style={{ 
+                  background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                  opacity: config.dpiMethod === '1' ? 1 : 0.5,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => updateConfig('dpiMethod', '1')}
+              >
+                <div className="v2-icon blue" style={{ background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.2)' : '' }}>
+                  <Zap size={20} className={config.dpiMethod === '1' ? 'active-icon' : ''} />
+                </div>
+                <div className="v2-item-text">
+                  <h3 style={{ color: config.dpiMethod === '1' ? '#60a5fa' : '' }}>Güçlü Mod</h3>
+                  <p>Yüksek engelleme aşma kapasitesi</p>
+                </div>
+                <div className={`v2-radio ${config.dpiMethod === '1' ? 'on' : ''}`}>
+                   {config.dpiMethod === '1' && <div className="v2-radio-dot" />}
+                </div>
+              </div>
+
+              <div className="v2-divider" />
+
+              <div 
+                className={`v2-item hover-effect ${config.dpiMethod === '0' ? 'v2-selected' : ''}`}
+                style={{ 
+                  background: config.dpiMethod === '0' ? 'rgba(234, 179, 8, 0.1)' : 'transparent',
+                  opacity: config.dpiMethod === '0' ? 1 : 0.5,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => updateConfig('dpiMethod', '0')}
+              >
+                <div className="v2-icon yellow" style={{ background: config.dpiMethod === '0' ? 'rgba(234, 179, 8, 0.2)' : '' }}>
+                  <Activity size={20} className={config.dpiMethod === '0' ? 'active-icon' : ''} />
+                </div>
+                <div className="v2-item-text">
+                  <h3 style={{ color: config.dpiMethod === '0' ? '#facc15' : '' }}>Hızlı Mod (Önerilen)</h3>
+                  <p>Daha düşük işlemci kullanımı, günlük kullanım için ideal</p>
+                </div>
+                <div className={`v2-radio ${config.dpiMethod === '0' ? 'on' : ''}`}>
+                   {config.dpiMethod === '0' && <div className="v2-radio-dot" />}
+                </div>
+              </div>
+          </div>
+        </div>
+        
         {/* Section: Language */}
         <div className="v2-section">
           <div className="v2-section-title">DİL</div>
@@ -248,6 +301,8 @@ const Settings = ({ onBack, config, updateConfig }) => {
             </div>
           </div>
         </div>
+
+
 
         {/* Section: DNS */}
         <div className="v2-section">

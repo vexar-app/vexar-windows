@@ -187,72 +187,111 @@ struct SystemSpecs {
     device_type: String,
 }
 
-fn run_powershell(cmd: &str) -> String {
+#[tauri::command]
+async fn get_system_specs() -> SystemSpecs {
+    // 1. Sysinfo işlemlerini (CPU, RAM, OS) thread pool'da çalıştır (UI donmasını önler)
+    let (cpu_model, total_memory_gb, os_version) = tauri::async_runtime::spawn_blocking(|| {
+        let mut sys = System::new();
+        sys.refresh_cpu();
+        sys.refresh_memory();
+
+        let cpu = sys
+            .cpus()
+            .first()
+            .map(|cpu| cpu.brand().to_string())
+            .unwrap_or("Unknown".to_string());
+
+        let mem = (sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0).round() as u64;
+        let os = System::long_os_version().unwrap_or("Unknown".to_string());
+
+        (cpu, mem, os)
+    })
+    .await
+    .unwrap_or(("Unknown".to_string(), 0, "Unknown".to_string()));
+
+    // 2. PowerShell işlemlerini TEK SEFERDE yap (5 kat hız artışı)
+    let mut gpu_model = "Unknown".to_string();
+    let mut disk_type = "Unknown".to_string();
+    let mut monitor_info = "Unknown".to_string();
+    let mut network_type = "Unknown".to_string();
+    let mut device_type = "Assignment".to_string(); // Desktop default
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        let output = std::process::Command::new("powershell")
-            .args(&["-Command", cmd])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+        let ps_script = r#"
+            $ErrorActionPreference = 'SilentlyContinue'
+            
+            $gpu = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name -First 1
+            $disk = Get-PhysicalDisk | Where-Object { $_.MediaType -eq 'SSD' -or $_.MediaType -eq 'HDD' } | Select-Object -ExpandProperty MediaType -First 1
+            
+            $res = Get-CimInstance Win32_VideoController | Select-Object -First 1
+            $monitor = if ($res) { "$($res.CurrentHorizontalResolution)x$($res.CurrentVerticalResolution) @ $($res.CurrentRefreshRate)Hz" } else { "Unknown" }
+            
+            $wifi = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -match 'Wireless|802.11' }
+            $net = if ($wifi) { "Wi-Fi" } else { "Ethernet" }
+            
+            $battery = Get-CimInstance Win32_Battery
+            $dev = if ($battery) { "Laptop" } else { "Desktop" }
+            
+            @{
+                gpu = "$gpu"
+                disk = "$disk"
+                monitor = "$monitor"
+                net = "$net"
+                dev = "$dev"
+            } | ConvertTo-Json -Compress
+        "#;
 
-        if let Ok(o) = output {
-            String::from_utf8_lossy(&o.stdout).trim().to_string()
-        } else {
-            "Unknown".to_string()
+        // Async process execution (spawn_blocking is fine for Command output)
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            std::process::Command::new("powershell")
+                .args(&["-NoProfile", "-Command", ps_script])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok());
+
+        if let Some(out) = output {
+            if let Ok(json_str) = String::from_utf8(out.stdout) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    // Güvenli veri çekme
+                    let clean_str = |v: &serde_json::Value| -> String {
+                        v.as_str().unwrap_or("Unknown").trim().to_string()
+                    };
+
+                    let g = clean_str(&parsed["gpu"]);
+                    if !g.is_empty() {
+                        gpu_model = g;
+                    }
+
+                    let d = clean_str(&parsed["disk"]);
+                    if !d.is_empty() {
+                        disk_type = d;
+                    }
+
+                    let m = clean_str(&parsed["monitor"]);
+                    if !m.is_empty() && m != "Unknown" {
+                        monitor_info = format!("{} (Aktif)", m);
+                    }
+
+                    let n = clean_str(&parsed["net"]);
+                    if !n.is_empty() {
+                        network_type = n;
+                    }
+
+                    let dev = clean_str(&parsed["dev"]);
+                    if !dev.is_empty() {
+                        device_type = dev;
+                    }
+                }
+            }
         }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "Unknown".to_string()
-    }
-}
-
-#[tauri::command]
-fn get_system_specs() -> SystemSpecs {
-    let mut sys = System::new_all();
-    sys.refresh_all();
-
-    let cpu_model = sys
-        .cpus()
-        .first()
-        .map(|cpu| cpu.brand().to_string())
-        .unwrap_or("Unknown".to_string());
-    let total_memory_gb = (sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0).round() as u64;
-    let os_version = System::long_os_version().unwrap_or("Unknown".to_string());
-
-    // GPU Info
-    let gpu_model = run_powershell(
-        "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name -First 1",
-    );
-
-    // Disk Info
-    let disk_raw = run_powershell(
-        "Get-PhysicalDisk | Where-Object { $_.MediaType -eq 'SSD' -or $_.MediaType -eq 'HDD' } | Select-Object -ExpandProperty MediaType -First 1",
-    );
-    let disk_type = if disk_raw.is_empty() {
-        "Unknown".to_string()
-    } else {
-        disk_raw
-    };
-
-    let monitor_raw = run_powershell(
-        "Get-CimInstance Win32_VideoController | Select-Object -First 1 | ForEach-Object { \"$($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution) @ $($_.CurrentRefreshRate)Hz\" }",
-    );
-    let monitor_info = if monitor_raw.is_empty() {
-        "Unknown".to_string()
-    } else {
-        format!("{} (Aktif)", monitor_raw)
-    };
-
-    let network_type = run_powershell(
-        "if ((Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty PhysicalMediaType -First 1) -match 'Wireless|802.11') { 'Wi-Fi' } else { 'Ethernet' }",
-    );
-
-    let device_type =
-        run_powershell("if (Get-CimInstance Win32_Battery) { 'Laptop' } else { 'Desktop' }");
 
     SystemSpecs {
         cpu_model,
@@ -263,6 +302,34 @@ fn get_system_specs() -> SystemSpecs {
         monitor_info,
         network_type,
         device_type,
+    }
+}
+
+#[tauri::command]
+fn check_admin() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        // Basit ve etkili yöntem: 'net session' komutu sadece admin yetkisiyle çalışır
+        // Exit code 0 ise admindir, değilse (veya access denied ise) değildir
+        let status = std::process::Command::new("net")
+            .arg("session")
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if let Ok(s) = status {
+            return s.success();
+        }
+        return false;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Unix-like sistemlerde uid kontrolü yapılabilir ama şimdilik true dönüyoruz
+        true
     }
 }
 
@@ -372,7 +439,8 @@ pub fn run() {
             clear_system_proxy,
             set_system_proxy,
             update_tray_tooltip,
-            get_system_specs
+            get_system_specs,
+            check_admin
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
