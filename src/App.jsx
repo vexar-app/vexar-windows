@@ -649,7 +649,7 @@ function App() {
 
       const storedId = localStorage.getItem('vexar_device_id');
       const isSent = localStorage.getItem('vexar_telemetry_sent');
-      const telemetryVersion = '1.4'; // Monitör (Aktif) etiketi için
+      const telemetryVersion = '1.0.0';
 
       // 2. ID varsa ve zaten gönderilmişse (ve versiyon aynıysa) çık (Log ekle)
       const sentVersion = localStorage.getItem('vexar_telemetry_version');
