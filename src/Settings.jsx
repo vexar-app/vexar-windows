@@ -2,22 +2,13 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronLeft, Globe, Power, Zap, RotateCw, Activity, 
-  Shield, Youtube, Coffee, AlertTriangle, Check, Wrench
+  Shield, Youtube, Coffee, AlertTriangle, Check, Wrench, Languages
 } from 'lucide-react';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { open, Command } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
+import { getTranslations, SUPPORTED_LANGUAGES } from './i18n';
 import './App.css';
-
-const DNS_PROVIDERS = [
-  { id: 'system', name: 'Sistem Varsayılanı', desc: 'SpoofDPI Varsayılan DNS', ip: null },
-  { id: 'cloudflare', name: 'Cloudflare', desc: 'Hızlı ve Gizli', ip: '1.1.1.1' },
-  { id: 'adguard', name: 'AdGuard', desc: 'Reklam Engelleyici', ip: '94.140.14.14' },
-  { id: 'google', name: 'Google', desc: 'Güvenilir', ip: '8.8.8.8' },
-  { id: 'quad9', name: 'Quad9', desc: 'Güvenlik Odaklı', ip: '9.9.9.9' },
-  { id: 'opendns', name: 'OpenDNS', desc: 'Cisco Güvencesi', ip: '208.67.222.222' }
-];
-
 
 const Toggle = ({ checked, onChange }) => (
   <div 
@@ -35,8 +26,25 @@ const Settings = ({ onBack, config, updateConfig }) => {
   const [latencies, setLatencies] = useState({});
   const [isChecking, setIsChecking] = useState(false);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
-  const [sortedProviders, setSortedProviders] = useState(DNS_PROVIDERS);
-  const [fixStatus, setFixStatus] = useState('idle'); // idle, fixing, fixed, error
+  const [sortedProviders, setSortedProviders] = useState([]);
+  const [fixStatus, setFixStatus] = useState('idle');
+
+  const lang = config.language || 'tr';
+  const t = getTranslations(lang);
+
+  // DNS Providers with translations
+  const DNS_PROVIDERS = [
+    { id: 'system', name: t.dnsSystemDefault, desc: t.dnsSystemDefaultDesc, ip: null },
+    { id: 'cloudflare', name: 'Cloudflare', desc: t.dnsCfDesc, ip: '1.1.1.1' },
+    { id: 'adguard', name: 'AdGuard', desc: t.dnsAdguardDesc, ip: '94.140.14.14' },
+    { id: 'google', name: 'Google', desc: t.dnsGoogleDesc, ip: '8.8.8.8' },
+    { id: 'quad9', name: 'Quad9', desc: t.dnsQuad9Desc, ip: '9.9.9.9' },
+    { id: 'opendns', name: 'OpenDNS', desc: t.dnsOpenDnsDesc, ip: '208.67.222.222' }
+  ];
+
+  useEffect(() => {
+    setSortedProviders(DNS_PROVIDERS);
+  }, [lang]);
 
   useEffect(() => {
     checkAutostart();
@@ -75,14 +83,11 @@ const Settings = ({ onBack, config, updateConfig }) => {
     setIsChecking(true);
     const newLatencies = {};
     
-    // ✅ System DNS'i ping'den hariç tut (IP'si yok)
     const pingableProviders = DNS_PROVIDERS.filter(p => p.ip !== null);
     
-    // ✅ Adaptive Timeout: Network tipine göre süre ayarla
     const isSlowConnection = navigator.connection?.effectiveType === '3g' || navigator.connection?.effectiveType === '2g';
     const TIMEOUT_MS = isSlowConnection ? 3000 : 1500;
 
-    // ✅ Promise.allSettled kullan (bir hata tümünü durdurmaz)
     const results = await Promise.allSettled(
       pingableProviders.map(async (provider) => {
         const controller = new AbortController();
@@ -108,8 +113,6 @@ const Settings = ({ onBack, config, updateConfig }) => {
       })
     );
 
-    
-    // ✅ Sonuçları işle
     results.forEach(result => {
       if (result.status === 'fulfilled') {
         newLatencies[result.value.id] = result.value.latency;
@@ -118,32 +121,27 @@ const Settings = ({ onBack, config, updateConfig }) => {
     
     setLatencies(newLatencies);
     
-    // ✅ Sıralama: System DNS her zaman en üstte, diğerleri latency'e göre
     const systemDns = DNS_PROVIDERS.find(p => p.id === 'system');
     const otherDns = DNS_PROVIDERS.filter(p => p.id !== 'system').sort((a, b) => 
       (newLatencies[a.id] || 999) - (newLatencies[b.id] || 999)
     );
     
     const sorted = systemDns ? [systemDns, ...otherDns] : otherDns;
-    
     setSortedProviders(sorted);
     
-    // ✅ Auto modda en iyi DNS'i seç (system hariç)
     if (config.dnsMode === 'auto') {
-      const bestDns = otherDns[0]; // En iyi ping sonucu
+      const bestDns = otherDns[0];
       if (bestDns) {
         updateConfig('selectedDns', bestDns.id);
       }
     }
 
-    
     setIsChecking(false);
   };
 
   const handleFixInternet = async () => {
     setFixStatus('fixing');
     
-    // Artificial delay for better UX feel
     setTimeout(async () => {
       try {
         await invoke('clear_system_proxy');
@@ -154,8 +152,10 @@ const Settings = ({ onBack, config, updateConfig }) => {
         setFixStatus('error');
         setTimeout(() => setFixStatus('idle'), 2000);
       }
-    }, 1200); // 1.2s delay to show "Repairing" status
+    }, 1200);
   };
+
+  const currentLang = SUPPORTED_LANGUAGES.find(l => l.code === lang) || SUPPORTED_LANGUAGES[0];
 
   return (
     <div className="v2-settings-overlay">
@@ -164,41 +164,41 @@ const Settings = ({ onBack, config, updateConfig }) => {
         <button className="v2-back-btn" onClick={onBack}>
           <ChevronLeft size={28} />
         </button>
-        <h1>AYARLAR</h1>
+        <h1>{t.settingsTitle}</h1>
       </div>
 
       {/* Scrollable Content */}
       <div className="v2-settings-content">
-        
 
-        {/* Section: DPI Method */}
+        {/* ========== 1. DİL (En üstte) ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">BAĞLANTI YÖNTEMİ</div>
+          <div className="v2-section-title">{t.language}</div>
           <div className="v2-card">
-              <div 
-                className={`v2-item hover-effect ${config.dpiMethod === '1' ? 'v2-selected' : ''}`}
-                style={{ 
-                  background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-                  opacity: config.dpiMethod === '1' ? 1 : 0.5,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease'
-                }}
-                onClick={() => updateConfig('dpiMethod', '1')}
-              >
-                <div className="v2-icon blue" style={{ background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.2)' : '' }}>
-                  <Zap size={20} className={config.dpiMethod === '1' ? 'active-icon' : ''} />
-                </div>
-                <div className="v2-item-text">
-                  <h3 style={{ color: config.dpiMethod === '1' ? '#60a5fa' : '' }}>Güçlü Mod</h3>
-                  <p>Yüksek engelleme aşma kapasitesi</p>
-                </div>
-                <div className={`v2-radio ${config.dpiMethod === '1' ? 'on' : ''}`}>
-                   {config.dpiMethod === '1' && <div className="v2-radio-dot" />}
-                </div>
+            <div className="v2-item hover-effect" 
+              onClick={() => {
+                const nextLang = lang === 'tr' ? 'en' : 'tr';
+                updateConfig('language', nextLang);
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              <div className="v2-icon blue"><Languages size={20} /></div>
+              <div className="v2-item-text">
+                <h3>{t.language}</h3>
+                <p>{t.languageDesc}</p>
               </div>
+              <div className="v2-badge" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span>{currentLang.flag}</span>
+                <span>{currentLang.code.toUpperCase()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-              <div className="v2-divider" />
-
+        {/* ========== 2. BAĞLANTI YÖNTEMİ ========== */}
+        <div className="v2-section">
+          <div className="v2-section-title">{t.sectionMethod}</div>
+          <div className="v2-card">
+              {/* Hızlı Mod (Önerilen) - Üstte */}
               <div 
                 className={`v2-item hover-effect ${config.dpiMethod === '0' ? 'v2-selected' : ''}`}
                 style={{ 
@@ -213,78 +213,67 @@ const Settings = ({ onBack, config, updateConfig }) => {
                   <Activity size={20} className={config.dpiMethod === '0' ? 'active-icon' : ''} />
                 </div>
                 <div className="v2-item-text">
-                  <h3 style={{ color: config.dpiMethod === '0' ? '#facc15' : '' }}>Hızlı Mod (Önerilen)</h3>
-                  <p>Daha düşük işlemci kullanımı, günlük kullanım için ideal</p>
+                  <h3 style={{ color: config.dpiMethod === '0' ? '#facc15' : '' }}>{t.methodFast}</h3>
+                  <p>{t.methodFastDesc}</p>
                 </div>
                 <div className={`v2-radio ${config.dpiMethod === '0' ? 'on' : ''}`}>
                    {config.dpiMethod === '0' && <div className="v2-radio-dot" />}
                 </div>
               </div>
+
+              <div className="v2-divider" />
+
+              {/* Güçlü Mod - Altta */}
+              <div 
+                className={`v2-item hover-effect ${config.dpiMethod === '1' ? 'v2-selected' : ''}`}
+                style={{ 
+                  background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                  opacity: config.dpiMethod === '1' ? 1 : 0.5,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => updateConfig('dpiMethod', '1')}
+              >
+                <div className="v2-icon blue" style={{ background: config.dpiMethod === '1' ? 'rgba(59, 130, 246, 0.2)' : '' }}>
+                  <Zap size={20} className={config.dpiMethod === '1' ? 'active-icon' : ''} />
+                </div>
+                <div className="v2-item-text">
+                  <h3 style={{ color: config.dpiMethod === '1' ? '#60a5fa' : '' }}>{t.methodStrong}</h3>
+                  <p>{t.methodStrongDesc}</p>
+                </div>
+                <div className={`v2-radio ${config.dpiMethod === '1' ? 'on' : ''}`}>
+                   {config.dpiMethod === '1' && <div className="v2-radio-dot" />}
+                </div>
+              </div>
           </div>
         </div>
-        
-        {/* Section: Language */}
+
+        {/* ========== 2. AĞ AYARLARI ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">DİL</div>
+          <div className="v2-section-title">{t.sectionNetwork}</div>
           <div className="v2-card">
             <div className="v2-item">
-              <div className="v2-icon blue"><Globe size={20} /></div>
-              <div className="v2-item-text">
-                <h3>Uygulama Dili</h3>
-                <p>Türkçe varsayılan dildir.</p>
+              <div className="v2-icon purple" style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#a855f7' }}>
+                <Globe size={20} />
               </div>
-              <div className="v2-badge">TR</div>
+              <div className="v2-item-text">
+                <h3 style={{ color: '#d8b4fe' }}>{t.lanSharing}</h3>
+                <p>{t.lanSharingDesc}</p>
+              </div>
+              <Toggle checked={config.lanSharing || false} onChange={(v) => updateConfig('lanSharing', v)} />
             </div>
           </div>
         </div>
 
-        {/* Section: General */}
+        {/* ========== 3. OTOMASYON ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">GENEL</div>
-          <div className="v2-card">
-            
-            <div className="v2-item">
-              <div className="v2-icon green"><Power size={20} /></div>
-              <div className="v2-item-text">
-                <h3>Başlangıçta Çalıştır</h3>
-                <p>Windows açılınca Vexar'ı başlat</p>
-              </div>
-              <Toggle checked={autostartEnabled} onChange={toggleAutostart} />
-            </div>
-
-            <div className="v2-divider" />
-
-            <div className="v2-item">
-              <div className="v2-icon gray"><ChevronLeft size={20} style={{transform:'rotate(-90deg)'}} /></div>
-              <div className="v2-item-text">
-                <h3>Tepsiye Küçült</h3>
-                <p>Kapatıldığında arka planda çalışsın</p>
-              </div>
-              <Toggle checked={config.minimizeToTray} onChange={(v) => updateConfig('minimizeToTray', v)} />
-            </div>
-
-            <div className="v2-divider" />
-
-            <div className="v2-item">
-              <div className="v2-icon blue"><Shield size={20} /></div>
-              <div className="v2-item-text">
-                <h3>Anonim Veri Toplama</h3>
-                <p>Uygulama kullanımını geliştirmek için veri paylaş</p>
-              </div>
-              <Toggle checked={config.analytics} onChange={(v) => updateConfig('analytics', v)} />
-            </div>
-          </div>
-        </div>
-
-        {/* Section: Automation */}
-        <div className="v2-section">
-          <div className="v2-section-title">OTOMASYON</div>
+          <div className="v2-section-title">{t.sectionAutomation}</div>
           <div className="v2-card">
             <div className="v2-item">
               <div className="v2-icon yellow"><Zap size={20} /></div>
               <div className="v2-item-text">
-                <h3>Otomatik Bağlan</h3>
-                <p>Uygulama açılır açılmaz bağlan</p>
+                <h3>{t.autoConnect}</h3>
+                <p>{t.autoConnectDesc}</p>
               </div>
               <Toggle checked={config.autoConnect} onChange={(v) => updateConfig('autoConnect', v)} />
             </div>
@@ -294,20 +283,18 @@ const Settings = ({ onBack, config, updateConfig }) => {
             <div className="v2-item">
               <div className="v2-icon green"><RotateCw size={20} /></div>
               <div className="v2-item-text">
-                <h3>Otomatik Yeniden Bağlan</h3>
-                <p>Bağlantı koparsa otomatik yeniden dene</p>
+                <h3>{t.autoReconnect}</h3>
+                <p>{t.autoReconnectDesc}</p>
               </div>
               <Toggle checked={config.autoReconnect} onChange={(v) => updateConfig('autoReconnect', v)} />
             </div>
           </div>
         </div>
 
-
-
-        {/* Section: DNS */}
+        {/* ========== 4. DNS LİSTESİ ========== */}
         <div className="v2-section">
           <div className="v2-section-header-row">
-            <div className="v2-section-title">DNS LİSTESİ</div>
+            <div className="v2-section-title">{t.sectionDns}</div>
             <button className="v2-refresh-btn" onClick={checkAllLatencies} disabled={isChecking}>
               <RotateCw size={16} className={isChecking ? 'spin' : ''} />
             </button>
@@ -316,8 +303,8 @@ const Settings = ({ onBack, config, updateConfig }) => {
           <div className="v2-card">
             <div className="v2-item">
               <div className="v2-item-text">
-                <h3>Otomatik Seçim (Önerilen)</h3>
-                <p>En hızlı sunucuyu otomatik bulur</p>
+                <h3>{t.dnsAutoSelect}</h3>
+                <p>{t.dnsAutoSelectDesc}</p>
               </div>
               <Toggle 
                 checked={config.dnsMode === 'auto'} 
@@ -332,7 +319,6 @@ const Settings = ({ onBack, config, updateConfig }) => {
               <AnimatePresence>
                 {sortedProviders.map((p) => {
                   const isSelected = config.selectedDns === p.id;
-                  // ✅ Sistem DNS'i auto modda da seçilebilir
                   const isDisabled = config.dnsMode === 'auto' && p.id !== 'system';
                   return (
                     <motion.div 
@@ -367,35 +353,52 @@ const Settings = ({ onBack, config, updateConfig }) => {
           </div>
         </div>
 
-        {/* Section: Developer */}
+        {/* ========== 5. GENEL ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">GELİŞTİRİCİ</div>
+          <div className="v2-section-title">{t.sectionGeneral}</div>
           <div className="v2-card">
-            <div className="v2-dev-profile">
-              <img 
-                src="https://yt3.ggpht.com/M-YH7dPjl40d2cXHK30at3hYyn1seO_RO4MJ-ee8FMN6wHrRQ6ZVaX48JIwHt0BqZSA3do8N2g=s88-c-k-c0x00ffffff-no-rj" 
-                alt="ConsolAktif"
-                className="v2-avatar-img"
-              />
-              <div className="v2-dev-details">
-                <span className="v2-dev-name">ConsolAktif</span>
-                <span className="v2-dev-role">Vexar Geliştiricisi</span>
+            
+            <div className="v2-item">
+              <div className="v2-icon green"><Power size={20} /></div>
+              <div className="v2-item-text">
+                <h3>{t.autoStart}</h3>
+                <p>{t.autoStartDesc}</p>
               </div>
+              <Toggle checked={autostartEnabled} onChange={toggleAutostart} />
             </div>
-            <div className="v2-dev-actions">
-               <button className="v2-btn youtube" onClick={() => open('https://youtube.com/@ConsolAktif')}>
-                  <Youtube size={18} /> Abone Ol
-               </button>
-               <button className="v2-btn coffee" onClick={() => open('https://www.patreon.com/c/ConsolAktif')}>
-                  <Coffee size={18} /> Destekle
-               </button>
+
+            <div className="v2-divider" />
+
+            <div className="v2-item">
+              <div className="v2-icon gray"><ChevronLeft size={20} style={{transform:'rotate(-90deg)'}} /></div>
+              <div className="v2-item-text">
+                <h3>{t.minimizeToTray}</h3>
+                <p>{t.minimizeToTrayDesc}</p>
+              </div>
+              <Toggle checked={config.minimizeToTray} onChange={(v) => updateConfig('minimizeToTray', v)} />
+            </div>
+
+          </div>
+        </div>
+
+        {/* ========== 6. GİZLİLİK ========== */}
+        <div className="v2-section">
+          <div className="v2-section-title">{t.sectionPrivacy}</div>
+          <div className="v2-card">
+            <div className="v2-item">
+              <div className="v2-icon blue"><Shield size={20} /></div>
+              <div className="v2-item-text">
+                <h3>{t.analytics}</h3>
+                <p>{t.analyticsDesc}</p>
+              </div>
+              <Toggle checked={config.analytics} onChange={(v) => updateConfig('analytics', v)} />
             </div>
           </div>
         </div>
 
-        {/* Section: Troubleshooting */}
+        {/* ========== 7. SORUN GİDERME ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">SORUN GİDERME</div>
+          <div className="v2-section-title">{t.sectionTroubleshoot}</div>
           <div className="v2-card" style={{ 
             background: fixStatus === 'fixing' ? '#b45309' : fixStatus === 'fixed' ? '#10b981' : fixStatus === 'error' ? '#ef4444' : '#002c1dff', 
             border: 'none',
@@ -411,10 +414,10 @@ const Settings = ({ onBack, config, updateConfig }) => {
                </div>
                 <div className="v2-item-text">
                   <h3 style={{ color: '#ffffff', transition: 'all 0.4s ease' }}>
-                    {fixStatus === 'fixing' ? 'Onarılıyor...' : fixStatus === 'fixed' ? 'Onarıldı!' : fixStatus === 'error' ? 'Hata Oluştu!' : 'İnternet Bağlantısını Onar'}
+                    {fixStatus === 'fixing' ? t.fixRepairing : fixStatus === 'fixed' ? t.fixDone : fixStatus === 'error' ? t.fixError : t.fixInternet}
                   </h3>
                   <p style={{ color: 'rgba(255, 255, 255, 0.82)', transition: 'all 0.4s ease' }}>
-                    {fixStatus === 'fixing' ? 'Sistem ayarları sıfırlanıyor, lütfen bekleyin.' : fixStatus === 'fixed' ? 'Proxy ayarları temizlendi ve internet onarıldı.' : fixStatus === 'error' ? 'İşlem sırasında bir sorun meydana geldi.' : 'Proxy takılı kalırsa interneti otomatik düzeltir.'}
+                    {fixStatus === 'fixing' ? t.fixRepairingDesc : fixStatus === 'fixed' ? t.fixDoneDesc : fixStatus === 'error' ? t.fixErrorDesc : t.fixInternetDesc}
                   </p>
                 </div>
                <div style={{ padding: '0 0.5rem' }}>
@@ -426,20 +429,44 @@ const Settings = ({ onBack, config, updateConfig }) => {
           </div>
         </div>
 
-        {/* Section: Important Notice */}
+        {/* ========== 8. GELİŞTİRİCİ ========== */}
         <div className="v2-section">
-          <div className="v2-section-title">ÖNEMLİ BİLGİ</div>
+          <div className="v2-section-title">{t.sectionDev}</div>
+          <div className="v2-card">
+            <div className="v2-dev-profile">
+              <img 
+                src="https://yt3.ggpht.com/M-YH7dPjl40d2cXHK30at3hYyn1seO_RO4MJ-ee8FMN6wHrRQ6ZVaX48JIwHt0BqZSA3do8N2g=s88-c-k-c0x00ffffff-no-rj" 
+                alt="ConsolAktif"
+                className="v2-avatar-img"
+              />
+              <div className="v2-dev-details">
+                <span className="v2-dev-name">ConsolAktif</span>
+                <span className="v2-dev-role">{t.devRole}</span>
+              </div>
+            </div>
+            <div className="v2-dev-actions">
+               <button className="v2-btn youtube" onClick={() => open('https://youtube.com/@ConsolAktif')}>
+                 <Youtube size={18} /> {t.devSubscribe}
+               </button>
+               <button className="v2-btn coffee" onClick={() => open('https://www.patreon.com/c/ConsolAktif')}>
+                 <Coffee size={18} /> {t.devSupport}
+               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ========== 9. ÖNEMLİ BİLGİ ========== */}
+        <div className="v2-section">
+          <div className="v2-section-title">{t.sectionNotice}</div>
           <div className="v2-card" style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
             <div className="v2-item">
                <div className="v2-icon" style={{ color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)' }}>
                  <AlertTriangle size={20} />
                </div>
                <div className="v2-item-text">
-                 <h3 style={{ color: '#fca5a5' }}>Güvenlik ve Yanlış Pozitif</h3>
+                 <h3 style={{ color: '#fca5a5' }}>{t.noticeTitle}</h3>
                  <p style={{ color: '#f87171', fontSize: '0.75rem', lineHeight: '1.4' }}>
-                   Vexar motoru, Windows Defender AI gibi yapay zeka tabanlı sistemler tarafından bazen "yanlış pozitif" olarak algılanabilir. 
-                   Bu durum tamamen zararsızdır. Ayrıca Kaspersky, ESET gibi yazılımlar HTTPS tarama özelliğiyle bağlantıyı engelleyebilir. 
-                   Erişim sorunu yaşarsanız bu ayarları kontrol edin.
+                   {t.noticeDesc}
                  </p>
                </div>
             </div>

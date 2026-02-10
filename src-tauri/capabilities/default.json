@@ -16,7 +16,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/spoofdpi",
+          "name": "binaries/vexar-proxy",
           "sidecar": true,
           "args": true
         },
@@ -76,7 +76,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/spoofdpi",
+          "name": "binaries/vexar-proxy",
           "sidecar": true,
           "args": true
         }
@@ -86,7 +86,7 @@
       "identifier": "shell:allow-kill",
       "allow": [
         {
-          "name": "binaries/spoofdpi",
+          "name": "binaries/vexar-proxy",
           "sidecar": true,
           "args": true
         }

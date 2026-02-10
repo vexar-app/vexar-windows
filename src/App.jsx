@@ -1,12 +1,13 @@
 import Settings from './Settings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
-import { useState, useRef, useEffect } from 'react';
-import { Command } from '@tauri-apps/plugin-shell';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { Command, open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
+import { getTranslations } from './i18n';
 
 // Re-add missing imports
-import { Power, Shield, Settings as SettingsIcon, FileText, X, Copy, Trash2, WifiOff } from 'lucide-react';
+import { Power, Shield, Settings as SettingsIcon, FileText, X, Copy, Trash2, WifiOff, Globe, Smartphone, HelpCircle } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { exit } from '@tauri-apps/plugin-process';
@@ -18,6 +19,8 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [logs, setLogs] = useState([]);
   const [currentPort, setCurrentPort] = useState(8080);
+  const [lanIp, setLanIp] = useState('127.0.0.1'); // ✅ LAN IP State
+  const [showConnectionModal, setShowConnectionModal] = useState(false); // ✅ Modal State
   const [isProcessing, setIsProcessing] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -31,7 +34,7 @@ function App() {
       .then(result => {
         setIsAdmin(result);
         if (!result) {
-          addLog("Yönetici izni eksik! Uygulama düzgün çalışmayabilir.", "error");
+          addLog(getTranslations(configRef.current.language || 'tr').logAdminMissing, "error");
         }
       })
       .catch(err => {
@@ -42,11 +45,11 @@ function App() {
     // ✅ Internet Connection Listeners
     const handleOnline = () => {
         setIsOnline(true);
-        addLog("İnternet bağlantısı tekrar sağlandı.", "success");
+        addLog(getTranslations(configRef.current.language || 'tr').logInternetBack, "success");
     };
     const handleOffline = () => {
         setIsOnline(false);
-        addLog("İnternet bağlantısı kesildi!", "error");
+        addLog(getTranslations(configRef.current.language || 'tr').logInternetLost, "error");
     };
 
     window.addEventListener('online', handleOnline);
@@ -83,6 +86,9 @@ function App() {
     }
     return defaultSettings;
   });
+
+  // ✅ i18n: Reactive translations (config'den sonra olmalı!)
+  const t = useMemo(() => getTranslations(config.language || 'tr'), [config.language]);
 
   const childProcess = useRef(null);
   const logsEndRef = useRef(null);
@@ -204,7 +210,7 @@ function App() {
     try {
       await invoke('clear_system_proxy');
       if (!silent) {
-        addLog('Sistem Proxy Temizlendi', 'success');
+        addLog(t.logProxyCleared, 'success');
       }
     } catch (e) {
       addLog(`Proxy temizleme hatası: ${e}`, 'warn');
@@ -227,16 +233,16 @@ function App() {
           const dnsName = DNS_MAP[config.selectedDns] 
             ? Object.keys(DNS_MAP).find(key => DNS_MAP[key] === DNS_MAP[config.selectedDns])?.toUpperCase()
             : 'SYSTEM';
-          tooltip = `🟢 Vexar - Bağlı\n127.0.0.1:${currentPort}\nDNS: ${dnsName}`;
+          tooltip = `🟢 Vexar - ${t.statusConnected}\n127.0.0.1:${currentPort}\nDNS: ${dnsName}`;
           break;
         case 'disconnected':
-          tooltip = '⚪ Vexar - Kapalı';
+          tooltip = `⚪ Vexar - ${t.statusInactive}`;
           break;
         case 'retrying':
-          tooltip = `🟡 Vexar - Yeniden Bağlanıyor\nDeneme ${retryCount.current}/5...`;
+          tooltip = `🟡 Vexar - ${t.btnConnecting}\n${retryCount.current}/5...`;
           break;
         case 'connecting':
-          tooltip = '🔵 Vexar - Bağlanıyor...';
+          tooltip = `🔵 Vexar - ${t.btnConnecting}`;
           break;
         default:
           tooltip = 'Vexar';
@@ -260,18 +266,18 @@ function App() {
 
     if (currentAttempt >= maxAttempts) {
       // Maksimum deneme aşıldı
-      addLog('❌ Bağlantı kurulamadı. Maksimum deneme sayısına ulaşıldı.', 'error');
+      addLog(`❌ ${t.logMaxRetries}`, 'error');
       addLog('', 'info');
-      addLog('📋 Olası sebepler:', 'warn');
-      addLog('  • İnternet bağlantınız kesilmiş olabilir', 'info');
-      addLog('  • Firewall/Antivirüs Vexar\'ı engelliyor olabilir', 'info');
-      addLog('  • 8080-8084 portları sistem tarafından kullanılıyor', 'info');
+      addLog(`📋 ${t.logPossibleReasons}`, 'warn');
+      addLog(`  • ${t.logReasonInternet}`, 'info');
+      addLog(`  • ${t.logReasonFirewall}`, 'info');
+      addLog(`  • ${t.logReasonPorts}`, 'info');
       addLog('', 'info');
-      addLog('💡 Çözüm önerileri:', 'warn');
-      addLog('  • İnternet bağlantınızı kontrol edin', 'info');
-      addLog('  • Firewall ayarlarınızı kontrol edin', 'info');
-      addLog('  • Uygulamayı yönetici olarak çalıştırın', 'info');
-      addLog('  • Logları kopyalayıp destek için paylaşabilirsiniz', 'info');
+      addLog(`💡 ${t.logSolutions}`, 'warn');
+      addLog(`  • ${t.logSolInternet}`, 'info');
+      addLog(`  • ${t.logSolFirewall}`, 'info');
+      addLog(`  • ${t.logSolAdmin}`, 'info');
+      addLog(`  • ${t.logSolLogs}`, 'info');
       
       retryCount.current = 0;
       setIsProcessing(false);
@@ -282,13 +288,13 @@ function App() {
     retryCount.current++;
 
     if (delay === 0) {
-      addLog(`🔄 Yeniden bağlanılıyor... (Deneme ${currentAttempt + 1}/${maxAttempts})`, 'warn');
+      addLog(`🔄 ${t.logReconnecting(currentAttempt + 1)}`, 'warn');
       startEngine(8080);
     } else {
-      addLog(`⏳ ${delay / 1000} saniye sonra yeniden denenecek... (Deneme ${currentAttempt + 1}/${maxAttempts})`, 'warn');
-      updateTrayTooltip('retrying'); // ✅ Retry durumu
+      addLog(`⏳ ${t.logReconnectWait(delay / 1000, currentAttempt + 1)}`, 'warn');
+      updateTrayTooltip('retrying');
       retryTimer.current = setTimeout(() => {
-        addLog(`🔄 Yeniden bağlanılıyor...`, 'info');
+        addLog(`🔄 ${t.logReconnectNow}`, 'info');
         startEngine(8080);
       }, delay);
     }
@@ -310,42 +316,56 @@ function App() {
     return false;
   };
 
-  const startEngine = async (port, portRetryCount = 0) => {
-    updateTrayTooltip('connecting'); // ✅ Bağlanıyor durumu
+  const startEngine = async (ignoredPort, portRetryCount = 0) => {
+    updateTrayTooltip('connecting'); 
     
-    // Max 20 retries (genişletilmiş port aralığı için)
+    // Max 20 retries
     if (portRetryCount >= 20) {
-      addLog('Uygun port bulunamadı (8080-9000 meşgul)', 'error');
-      setIsProcessing(false);
-      return;
-    }
-    
-    // Port range limit
-    if (port > 9000) {
-      addLog('Port aralığı aşıldı (Max: 9000).', 'error');
+      addLog(t.logNoPort, 'error');
       setIsProcessing(false);
       return;
     }
 
+    // ✅ Rust'tan Smart Configuration al (Port & IP)
+    let configData;
+    let port;
+    let bindAddr;
+    
+    try {
+        configData = await invoke('get_sidecar_config', { 
+            allowLanSharing: configRef.current.lanSharing || false 
+        });
+        port = configData.port;
+        bindAddr = configData.bind_address;
+        setLanIp(configData.lan_ip); // IP'yi state'e kaydet
+    } catch (e) {
+        addLog(t.logConfigError(e), 'error');
+        setIsProcessing(false);
+        return;
+    }
+    
     if (childProcess.current) return;
     await clearProxy(true);
 
     const dnsIP = DNS_MAP[config.selectedDns];
     
-    addLog(`Vexar Motoru başlatılıyor (Port: ${port})...`, 'info');
+    addLog(t.logEngineStarting(port), 'info');
     
     // DNS bilgisi
     if (dnsIP) {
-      addLog(`Kullanılan DNS: ${config.selectedDns.toUpperCase()} (${dnsIP})`, 'info');
+      addLog(t.logDnsUsed(config.selectedDns.toUpperCase(), dnsIP), 'info');
     } else {
-      addLog(`DNS: Sistem Varsayılanı (SpoofDPI Default)`, 'info');
+      addLog(t.logDnsDefault, 'info');
     }
     
     isRetrying.current = false;
 
     try {
       // Base arguments
-      const args = ['-listen-port', port.toString()];
+      const args = [
+          '-listen-port', port.toString(),
+          '-listen-addr', bindAddr // ✅ Flag updated to match binary
+      ];
       
       // ✅ Sadece DNS seçiliyse ekle
       if (dnsIP) {
@@ -353,14 +373,13 @@ function App() {
       }
       
       // Diğer parametreler
-      // ISS Uyumluluğu ve Stabilite İçin Optimize Edilmiş Ayarlar
       args.push(
-        '-window-size', configRef.current.dpiMethod || '1', // Ayarlardan gelen değer
-        '-enable-doh',            // DNS zehirlemesini önlemek için şart
-        '-timeout', '5000'        // 60ms çok kısaydı, 5000ms (5sn) genel internet gecikmeleri için ideal
+        '-window-size', configRef.current.dpiMethod || '1', 
+        '-enable-doh',            
+        '-timeout', '5000'        
       );
       
-      const command = Command.sidecar('binaries/spoofdpi', args);
+      const command = Command.sidecar('binaries/vexar-proxy', args);
 
       
       let connectionConfirmed = false;
@@ -414,7 +433,7 @@ function App() {
           setCurrentPort(port);
           try {
             await invoke('set_system_proxy', { port });
-            addLog(`Sistem Proxy Ayarlandı: 127.0.0.1:${port}`, 'success');
+            addLog(t.logProxySet(port), 'success');
           } catch (err) {
             addLog(`Proxy ayarlanamadı: ${err}`, 'error');
             return;
@@ -426,7 +445,7 @@ function App() {
           
           setIsConnected(true);
           setIsProcessing(false);
-          addLog(`Güvenli Tünel Oluşturuldu`, 'success');
+          addLog(t.logConnected, 'success');
           updateTrayTooltip('connected'); 
           trackConnectionSuccess(); // Telemetri gönder
         }
@@ -445,7 +464,9 @@ function App() {
           }
           
           setTimeout(() => {
-            startEngine(port + 1, portRetryCount + 1);
+            // Smart Retry: Port increment yerine Rust'ın yeni port bulmasına güveniyoruz
+            // Ama yine de recursion için count artırıyoruz
+            startEngine(0, portRetryCount + 1); 
           }, 1000); 
         }
       };
@@ -472,7 +493,7 @@ function App() {
           
           // Kullanıcı kasıtlı kapatmadı - beklenmedik kapanma
           if (isUnexpectedClose) {
-              addLog(`⚠️ Vexar motoru beklenmedik şekilde durduruldu (Kod: ${data.code})`, 'warn');
+              addLog(`⚠️ ${t.logEngineStopped(data.code)}`, 'warn');
           } else {
               addLog('Vexar motoru kapatıldı.', 'info');
           }
@@ -495,7 +516,7 @@ function App() {
             hadActiveProcess;                     // Process çalışıyor muydu?
           
           if (shouldReconnect) {
-            addLog('🔄 Otomatik yeniden bağlanma aktif...', 'info');
+            addLog(`🔄 ${t.logAutoReconnect}`, 'info');
             setIsProcessing(true);
             attemptReconnect();
           }
@@ -516,7 +537,7 @@ function App() {
 
              try {
                 await invoke('set_system_proxy', { port: port });
-                addLog(`Sistem Proxy Ayarlandı (Otomatik): 127.0.0.1:${port}`, 'success');
+                addLog(t.logProxySet(port), 'success');
              } catch (err) {
                 addLog(`Proxy ayarlanamadı: ${err}`, 'error');
              }
@@ -527,14 +548,14 @@ function App() {
 
              setIsConnected(true);
              setIsProcessing(false);
-             addLog(`Bağlantı doğrulandı (Otomatik)`, 'info');
+             addLog(t.logConnected, 'info');
              trackConnectionSuccess(); // Telemetri gönder
              updateTrayTooltip('connected'); // ✅ Auto-connect başarılı
         }
       }, 2000); // ✅ 3000ms -> 2000ms (Fail-safe timeout azaltıldı)
 
     } catch (e) {
-      addLog(`Motor başlatılamadı: ${e}`, 'error');
+      addLog(t.logEngineStartError(e), 'error');
       setIsConnected(false);
       setIsProcessing(false);
       clearProxy();
@@ -557,7 +578,7 @@ function App() {
       setIsProcessing(true);
       if (childProcess.current) {
         try {
-          addLog('Vexar Motoru durduruluyor...', 'warn');
+          addLog(t.logDisconnected, 'warn');
           await childProcess.current.kill();
         } catch (e) {
           addLog(`Servis durdurma hatası: ${e}`, 'error');
@@ -582,6 +603,19 @@ function App() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  // ✅ LAN Sharing Değişince Restart (Side-Effect)
+  useEffect(() => {
+      if (config.lanSharing !== configRef.current.lanSharing) {
+           if (isConnected) {
+               addLog(t.logLanRestart, 'warn');
+               childProcess.current?.kill().catch(() => {});
+               childProcess.current = null;
+               setIsConnected(false);
+               setTimeout(() => startEngine(0), 1500); // 1.5s bekle (Portun boşa çıkması için)
+           }
+      }
+  }, [config.lanSharing]);
 
   const configRef = useRef(config);
 
@@ -727,6 +761,8 @@ function App() {
            device_monitor: specs.monitor_info,
            device_network_type: specs.network_type,
            device_type: specs.device_type,
+           device_windows_build: specs.windows_build,
+           device_isp: specs.isp,
            
            // Uygulama bilgileri
            platform: 'windows',
@@ -867,9 +903,9 @@ function App() {
               display: 'flex', 
               flexDirection: 'column', 
               alignItems: 'center', 
-              justifyContent: 'center', 
-              textAlign: 'center', 
-              padding: '2rem' 
+              justifyContent: 'center',
+              textAlign: 'center',
+              padding: '2rem'
             }}
           >
             {/* Background Glow */}
@@ -899,11 +935,11 @@ function App() {
                 />
 
                 <h1 style={{ fontSize: '1.5rem', marginBottom: '0.75rem', color: '#fff', fontWeight: '700' }}>
-                    Yönetici İzni Gerekli
+                    {t.adminTitle}
                 </h1>
                 
                 <p style={{ color: '#a1a1aa', marginBottom: '1.5rem', lineHeight: '1.6', fontSize: '0.95rem' }}>
-                    Vexar'ın sistem proxy ayarlarını yönetebilmesi için yetkiye ihtiyacı vardır.
+                    {t.adminDesc}
                 </p>
 
                 <div style={{
@@ -930,10 +966,8 @@ function App() {
                       <Shield size={22} />
                     </div>
                     <div>
-                      <div style={{ color: '#fff', fontSize: '0.9rem', fontWeight: '600', marginBottom: '4px' }}>Nasıl Çözülür?</div>
                       <div style={{ color: '#d4d4d8', fontSize: '0.85rem', lineHeight: '1.4' }}>
-                        Uygulamayı kapatın, simgeye sağ tıklayın ve <br/>
-                        <span style={{ color: '#f87171', fontWeight: '500' }}>"Yönetici olarak çalıştır"</span> seçeneğini seçin.
+                        {t.adminStep}
                       </div>
                     </div>
                   </div>
@@ -956,7 +990,7 @@ function App() {
                   onMouseLeave={(e) => e.target.style.opacity = '1'}
                   onClick={() => exit(0)}
                 >
-                  Uygulamayı Kapat
+                  {t.adminClose}
                 </button>
             </div>
           </motion.div>
@@ -972,8 +1006,8 @@ function App() {
           <div className="status-dot" />
           <span>
             {isProcessing 
-              ? (isConnected ? 'KESİLİYOR...' : 'BAĞLANIYOR...') 
-              : (isConnected ? 'AKTİF' : 'PASİF')}
+              ? (isConnected ? t.statusDisconnecting : t.statusConnecting) 
+              : (isConnected ? t.statusActive : t.statusReady)}
           </span>
         </div>
       </header>
@@ -998,7 +1032,7 @@ function App() {
                 fontWeight: '600'
              }}>
                 <WifiOff size={16} />
-                <span>İnternet Bağlantısı Yok</span>
+                <span>{t.noInternetTitle}</span>
              </div>
           </motion.div>
         )}
@@ -1019,21 +1053,38 @@ function App() {
         <div className="status-text">
           <h1 className={`status-title ${isConnected ? 'connected' : (isProcessing ? 'processing' : '')}`}>
             {isProcessing 
-              ? (isConnected ? 'KESİLİYOR...' : 'BAĞLANIYOR...')
-              : (isConnected ? 'GÜVENLİ' : 'HAZIR')}
+              ? (isConnected ? t.statusDisconnecting : t.statusConnecting)
+              : (isConnected ? t.statusConnected : t.statusReady2)}
           </h1>
           <p className="status-desc">
             {isProcessing
-              ? "İşlem yapılıyor, lütfen bekleyin."
+              ? t.descConnecting
               : (isConnected 
-                  ? "Bağlantınız şifrelendi ve korunuyor."
-                  : "DPI Bypass için bağlanın.")}
+                  ? t.descConnected
+                  : t.descReady)}
           </p>
         </div>
       </main>
 
       {/* Action Button */}
       <div className="action-area">
+        {/* LAN Connect Button */}
+        <AnimatePresence>
+            {config.lanSharing && isConnected && (
+                <motion.button 
+                    initial={{ opacity: 0, y: 10, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto', marginBottom: '1rem' }}
+                    exit={{ opacity: 0, y: 10, height: 0, marginBottom: 0 }}
+                    className="lan-connect-pill-btn"
+                    onClick={() => setShowConnectionModal(true)}
+                >
+                    <Smartphone size={16} />
+                    <span>{t.btnConnectDevices}</span>
+                    <div className="arrow-icon">›</div>
+                </motion.button>
+            )}
+        </AnimatePresence>
+
         <button 
           className={`main-btn ${isConnected ? 'disconnect' : 'connect'} ${isProcessing ? 'processing' : ''}`}
           onClick={toggleConnection}
@@ -1042,28 +1093,30 @@ function App() {
           <Power size={22} strokeWidth={2.5} />
           <span>
             {isProcessing 
-              ? (isConnected ? 'KESİLİYOR...' : 'BAĞLANIYOR...')
-              : (isConnected ? 'BAĞLANTIYI KES' : 'BAĞLAN')
+              ? (isConnected ? t.btnDisconnecting : t.btnConnecting)
+              : (isConnected ? t.btnDisconnect : t.btnConnect)
             }
           </span>
         </button>
       </div>
 
+
+
       {/* Bottom Navigation */}
       <nav className="bottom-nav">
         <button className="nav-btn" onClick={() => setShowSettings(true)}>
           <SettingsIcon size={22} strokeWidth={2} />
-          <span>AYARLAR</span>
+          <span>{t.navSettings}</span>
         </button>
         <div className="nav-divider" />
         <button className="nav-btn" onClick={() => setShowLogs(true)}>
           <FileText size={22} strokeWidth={2} />
-          <span>LOGLAR</span>
+          <span>{t.navLogs}</span>
         </button>
         <div className="nav-divider" />
         <button className="nav-btn exit" onClick={handleExit}>
           <Power size={22} strokeWidth={2} />
-          <span>ÇIKIŞ</span>
+          <span>{t.navExit}</span>
         </button>
       </nav>
 
@@ -1075,7 +1128,7 @@ function App() {
             </button>
             <div className="logs-title">
               <FileText size={20} className="logs-title-icon" />
-              <h3>SİSTEM LOGLARI</h3>
+              <h3>{t.logsTitle}</h3>
             </div>
           </div>
 
@@ -1093,7 +1146,7 @@ function App() {
           <div className="logs-footer">
             <button className="logs-action-btn clear-btn" onClick={clearLogs}>
               <Trash2 size={18} />
-              <span>TEMİZLE</span>
+              <span>{t.logsClear}</span>
             </button>
             <button 
               className={`logs-action-btn copy-btn ${copyStatus}`} 
@@ -1101,11 +1154,73 @@ function App() {
               disabled={logs.length === 0}
             >
               <Copy size={18} />
-              <span>{copyStatus === 'success' ? 'KOPYALANDI!' : copyStatus === 'error' ? 'HATA!' : 'KOPYALA'}</span>
+              <span>{copyStatus === 'success' ? t.logsCopied : copyStatus === 'error' ? t.logsCopyError : t.logsCopy}</span>
             </button>
           </div>
         </div>
       )}
+
+      {/* Connection Info Modal */}
+      <AnimatePresence>
+        {showConnectionModal && (
+            <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="modal-overlay"
+                onClick={() => setShowConnectionModal(false)}
+            >
+                <motion.div 
+                    initial={{ scale: 0.9, y: 20 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.9, y: 20 }}
+                    className="connection-modal"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div className="modal-header">
+                        <div className="modal-icon-bg">
+                            <Smartphone size={24} color="#a855f7" />
+                        </div>
+                        <div>
+                           <h2>{t.modalTitle}</h2>
+                           <p style={{fontSize: '0.8rem', color: '#a1a1aa', margin: 0}}>{t.modalSubtitle}</p>
+                        </div>
+                        <button className="close-btn" onClick={() => setShowConnectionModal(false)}>
+                            <X size={20} />
+                        </button>
+                    </div>
+                    
+                    <div className="modal-body">
+                        <p className="modal-desc">
+                            <span dangerouslySetInnerHTML={{ __html: t.modalDesc }} />
+                        </p>
+                        
+                        <div className="info-row">
+                            <div className="info-group">
+                                <label>{t.modalHost}</label>
+                                <div className="code-box" onClick={() => writeText(lanIp)}>
+                                    <span>{lanIp}</span>
+                                    <Copy size={16} />
+                                </div>
+                            </div>
+                            <div className="info-group">
+                                <label>{t.modalPort}</label>
+                                <div className="code-box" onClick={() => writeText(currentPort.toString())}>
+                                    <span>{currentPort}</span>
+                                    <Copy size={16} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <button className="tutorial-btn" onClick={() => open('https://www.youtube.com/@ConsolAktif/videos')}> 
+                            <HelpCircle size={18} />
+                            {t.modalTutorial}
+                        </button>
+                    </div>
+                </motion.div>
+            </motion.div>
+        )}
+      </AnimatePresence>
 
       {showSettings && (
         <Settings 

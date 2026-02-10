@@ -1,7 +1,59 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use local_ip_address::local_ip;
+use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::System;
+
+#[derive(serde::Serialize)]
+struct ConfigResponse {
+    port: u16,
+    lan_ip: String,
+    bind_address: String,
+}
+
+#[tauri::command]
+fn get_sidecar_config(allow_lan_sharing: bool) -> Result<ConfigResponse, String> {
+    let bind_addr = if allow_lan_sharing {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
+
+    // Öncelikli Portlar: 8080 - 8090 arası kontrol et
+    let mut selected_port = 0;
+    for port in 8080..=8090 {
+        if TcpListener::bind((bind_addr, port)).is_ok() {
+            selected_port = port;
+            break;
+        }
+    }
+
+    // Fallback: Eğer hepsi doluysa, sistemden rastgele bir port iste (Port 0)
+    if selected_port == 0 {
+        if let Ok(listener) = TcpListener::bind((bind_addr, 0)) {
+            if let Ok(addr) = listener.local_addr() {
+                selected_port = addr.port();
+            }
+        }
+    }
+
+    if selected_port == 0 {
+        return Err("Uygun port bulunamadı.".to_string());
+    }
+
+    // Yerel IP Adresini Bul (LAN Paylaşımı için)
+    let lan_ip = local_ip()
+        .ok()
+        .map(|ip| ip.to_string())
+        .unwrap_or("127.0.0.1".to_string());
+
+    Ok(ConfigResponse {
+        port: selected_port,
+        lan_ip,
+        bind_address: bind_addr.to_string(),
+    })
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -185,6 +237,8 @@ struct SystemSpecs {
     monitor_info: String,
     network_type: String,
     device_type: String,
+    windows_build: String,
+    isp: String,
 }
 
 #[tauri::command]
@@ -201,7 +255,15 @@ async fn get_system_specs() -> SystemSpecs {
             .map(|cpu| cpu.brand().to_string())
             .unwrap_or("Unknown".to_string());
 
-        let mem = (sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0).round() as u64;
+        // ✅ RAM: Doğru hesaplama (bytes → GB, ticari yuvarlama)
+        // sysinfo bytes döndürür. 1 GB = 1073741824 bytes
+        let mem_bytes = sys.total_memory() as f64;
+        let mem_gb = mem_bytes / 1_073_741_824.0; // 1024^3
+        // Ticari yuvarlama: 15.4 → 16, 7.8 → 8, 31.7 → 32
+        let mem = ((mem_gb / 2.0).round() * 2.0) as u64; // En yakın çift sayıya yuvarla (RAM stikleri çift olur)
+        // Fallback: 0 çıkarsa ham yuvarlama
+        let mem = if mem == 0 { mem_gb.ceil() as u64 } else { mem };
+
         let os = System::long_os_version().unwrap_or("Unknown".to_string());
 
         (cpu, mem, os)
@@ -214,7 +276,9 @@ async fn get_system_specs() -> SystemSpecs {
     let mut disk_type = "Unknown".to_string();
     let mut monitor_info = "Unknown".to_string();
     let mut network_type = "Unknown".to_string();
-    let mut device_type = "Assignment".to_string(); // Desktop default
+    let mut device_type = "Desktop".to_string();
+    let mut windows_build = "Unknown".to_string();
+    let mut isp = "Unknown".to_string();
 
     #[cfg(target_os = "windows")]
     {
@@ -224,24 +288,84 @@ async fn get_system_specs() -> SystemSpecs {
         let ps_script = r#"
             $ErrorActionPreference = 'SilentlyContinue'
             
-            $gpu = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name -First 1
+            # ✅ GPU: TÜM ekran kartlarını al (Intel + NVIDIA gibi)
+            $gpuList = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -and $_.Name -ne '' } | Select-Object -ExpandProperty Name
+            $gpu = if ($gpuList) { ($gpuList -join ' + ') } else { "Unknown" }
+            
             $disk = Get-PhysicalDisk | Where-Object { $_.MediaType -eq 'SSD' -or $_.MediaType -eq 'HDD' } | Select-Object -ExpandProperty MediaType -First 1
             
-            $res = Get-CimInstance Win32_VideoController | Select-Object -First 1
+            $res = Get-CimInstance Win32_VideoController | Where-Object { $_.CurrentHorizontalResolution -gt 0 } | Select-Object -First 1
             $monitor = if ($res) { "$($res.CurrentHorizontalResolution)x$($res.CurrentVerticalResolution) @ $($res.CurrentRefreshRate)Hz" } else { "Unknown" }
             
-            $wifi = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -match 'Wireless|802.11' }
-            $net = if ($wifi) { "Wi-Fi" } else { "Ethernet" }
+            # ✅ Network: Wi-Fi / Ethernet / USB Tethering / Bluetooth Tethering
+            $activeAdapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+            $netType = "Unknown"
+            foreach ($adapter in $activeAdapters) {
+                $desc = $adapter.InterfaceDescription.ToLower()
+                $media = $adapter.PhysicalMediaType
+                
+                # USB Tethering (RNDIS / Android / iPhone birden fazla kelime ile algılama)
+                if ($desc -match 'rndis|remote ndis|android|iphone|apple mobile|usb ethernet') {
+                    $netType = "USB Tethering"
+                    break
+                }
+                # Bluetooth Tethering
+                if ($desc -match 'bluetooth') {
+                    $netType = "Bluetooth Tethering"
+                    break
+                }
+                # Wi-Fi
+                if ($media -match 'Wireless|802\.11' -or $desc -match 'wi-fi|wifi|wireless') {
+                    $netType = "Wi-Fi"
+                }
+                # Ethernet (sadece Wi-Fi yoksa)
+                if ($netType -eq "Unknown" -and ($media -match '802\.3' -or $desc -match 'ethernet|realtek|intel.*i2')) {
+                    $netType = "Ethernet"
+                }
+            }
+            if ($netType -eq "Unknown" -and $activeAdapters) { $netType = "Ethernet" }
             
             $battery = Get-CimInstance Win32_Battery
             $dev = if ($battery) { "Laptop" } else { "Desktop" }
+            
+            # ✅ Windows Build Number (ör: 22631, 19045)
+            $winBuild = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber
+            if (-not $winBuild) { $winBuild = [System.Environment]::OSVersion.Version.Build.ToString() }
+            $displayVersion = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').DisplayVersion
+            $winBuildFull = if ($displayVersion) { "$displayVersion ($winBuild)" } else { "$winBuild" }
+            
+            # ✅ ISP Algılama (Gateway IP → nslookup ile ISP adı)
+            $ispName = "Unknown"
+            try {
+                $gw = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -First 1).NextHop
+                if ($gw) {
+                    # Harici IP al (hafif, hızlı)
+                    $extIp = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 3).Content
+                    if ($extIp) {
+                        # nslookup ile ISP bilgisi
+                        $nsl = nslookup $extIp 2>$null | Select-String 'name'
+                        if ($nsl) {
+                            $ispRaw = ($nsl -split '=')[-1].Trim().TrimEnd('.')
+                            # Son 2-3 segmenti al (ör: turktelekom.com.tr, superonline.net)
+                            $parts = $ispRaw -split '\.'
+                            if ($parts.Count -ge 3) {
+                                $ispName = ($parts[-3..-1] -join '.')
+                            } else {
+                                $ispName = $ispRaw
+                            }
+                        }
+                    }
+                }
+            } catch { }
             
             @{
                 gpu = "$gpu"
                 disk = "$disk"
                 monitor = "$monitor"
-                net = "$net"
+                net = "$netType"
                 dev = "$dev"
+                build = "$winBuildFull"
+                isp = "$ispName"
             } | ConvertTo-Json -Compress
         "#;
 
@@ -288,6 +412,16 @@ async fn get_system_specs() -> SystemSpecs {
                     if !dev.is_empty() {
                         device_type = dev;
                     }
+
+                    let b = clean_str(&parsed["build"]);
+                    if !b.is_empty() && b != "Unknown" {
+                        windows_build = b;
+                    }
+
+                    let i = clean_str(&parsed["isp"]);
+                    if !i.is_empty() && i != "Unknown" {
+                        isp = i;
+                    }
                 }
             }
         }
@@ -302,6 +436,8 @@ async fn get_system_specs() -> SystemSpecs {
         monitor_info,
         network_type,
         device_type,
+        windows_build,
+        isp,
     }
 }
 
@@ -440,7 +576,8 @@ pub fn run() {
             set_system_proxy,
             update_tray_tooltip,
             get_system_specs,
-            check_admin
+            check_admin,
+            get_sidecar_config
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

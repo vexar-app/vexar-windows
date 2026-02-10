@@ -27,6 +27,7 @@ tauri-plugin-process = "2"
 tauri-plugin-positioner = "2.3.1"
 tauri-plugin-clipboard-manager = "2.3.2"
 sysinfo = "0.30"
+local-ip-address = "0.6.10"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

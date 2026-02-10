@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "externalBin": [
-      "binaries/spoofdpi"
+      "binaries/vexar-proxy"
     ],
     "targets": "all",
     "icon": [
