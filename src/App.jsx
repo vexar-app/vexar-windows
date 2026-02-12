@@ -1212,7 +1212,7 @@ function App() {
                             </div>
                         </div>
 
-                        <button className="tutorial-btn" onClick={() => open('https://www.youtube.com/@ConsolAktif/videos')}> 
+                        <button className="tutorial-btn" onClick={() => open('https://vexar-official-website.vercel.app/proxy')}> 
                             <HelpCircle size={18} />
                             {t.modalTutorial}
                         </button>

@@ -512,7 +512,7 @@ pub fn run() {
                         "support" => {
                             use tauri_plugin_opener::OpenerExt;
                             app.opener()
-                                .open_url("https://www.patreon.com/c/ConsolAktif", None::<&str>)
+                                .open_url("https://www.patreon.com/join/ConsolAktif", None::<&str>)
                                 .unwrap_or(());
                         }
                         _ => {}

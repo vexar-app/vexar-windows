@@ -448,7 +448,7 @@ const Settings = ({ onBack, config, updateConfig }) => {
                <button className="v2-btn youtube" onClick={() => open('https://youtube.com/@ConsolAktif')}>
                  <Youtube size={18} /> {t.devSubscribe}
                </button>
-               <button className="v2-btn coffee" onClick={() => open('https://www.patreon.com/c/ConsolAktif')}>
+               <button className="v2-btn coffee" onClick={() => open('https://www.patreon.com/join/ConsolAktif')}>
                  <Coffee size={18} /> {t.devSupport}
                </button>
             </div>
